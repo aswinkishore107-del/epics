@@ -1,0 +1,760 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../server/node_modules/.prisma/client"
+}
+
+enum UserRole {
+  ELDERLY
+  CAREGIVER
+  DOCTOR
+  ADMIN
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum ConnectionStatus {
+  CONNECTED
+  DISCONNECTED
+  PAIRING
+}
+
+enum ChargingStatus {
+  CHARGING
+  DISCHARGING
+  FULL
+  UNKNOWN
+}
+
+enum HealthStatus {
+  STABLE
+  WARNING
+  CRITICAL
+}
+
+enum MeasurementSource {
+  ECG_DERIVED_RESPIRATION
+  OPTICAL_PPG
+  TMP117_SENSOR
+  MANUAL_ENTRY
+  SIMULATED
+}
+
+enum FallStatus {
+  DETECTED
+  COUNTDOWN_ACTIVE
+  CONFIRMED_FALL
+  CANCELLED_FALSE_ALARM
+}
+
+enum EmergencyType {
+  SOS
+  FALL
+  ABNORMAL_VITAL
+  DEVICE_ALERT
+}
+
+enum SeverityLevel {
+  INFO
+  LOW
+  MEDIUM
+  WARNING
+  HIGH
+  CRITICAL
+}
+
+enum EmergencyStatus {
+  ACTIVE
+  ACKNOWLEDGED
+  RESOLVED
+  CANCELLED
+}
+
+enum MedicationStatus {
+  UPCOMING
+  TAKEN
+  MISSED
+  SKIPPED
+}
+
+enum ReminderCategory {
+  MEDICATION
+  ACTIVITY
+  APPOINTMENT
+  HYDRATION
+  GENERAL
+}
+
+enum ReminderStatus {
+  PENDING
+  COMPLETED
+  SNOOZED
+  DISMISSED
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+enum NotificationType {
+  EMERGENCY
+  FALL
+  SOS
+  ABNORMAL_VITAL
+  MEDICATION
+  REMINDER
+  MESSAGE
+  HEALTH_UPDATE
+  APPOINTMENT
+}
+
+enum MessageType {
+  TEXT
+  ALERT
+  VOICE
+  IMAGE
+}
+
+enum MetricType {
+  HEART_RATE
+  SPO2
+  SKIN_TEMPERATURE
+  RESPIRATORY_RATE
+  BLOOD_PRESSURE_SYS
+  BLOOD_PRESSURE_DIA
+}
+
+enum RuleOperator {
+  GREATER_THAN
+  LESS_THAN
+  EQUALS
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  role         UserRole  @default(ELDERLY)
+  firstName    String
+  lastName     String
+  phone        String?
+  avatarUrl    String?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  elderlyProfile   ElderlyProfile?
+  caregiverProfile CaregiverProfile?
+  doctorProfile    DoctorProfile?
+
+  notifications   Notification[]
+  messagesSent    Message[]                  @relation("SentMessages")
+  conversations   ConversationParticipant[]
+  communityPosts  CommunityPost[]
+  communityComments CommunityComment[]
+  communityLikes  CommunityLike[]
+  aiConversations AiConversation[]
+  auditLogs       AuditLog[]
+
+  @@index([role])
+  @@index([email])
+}
+
+model ElderlyProfile {
+  id                 String    @id @default(uuid())
+  userId             String    @unique
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dateOfBirth        DateTime?
+  gender             Gender    @default(PREFER_NOT_TO_SAY)
+  bloodGroup         String?
+  emergencyNotes     String?
+  address            String?
+  primaryCaregiverId String?
+  primaryDoctorId    String?
+  deviceId           String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  relationships       PatientRelationship[]
+  emergencyContacts   EmergencyContact[]
+  devices             Device[]
+  healthReadings      HealthReading[]
+  ecgRecords          EcgRecord[]
+  respiratoryReadings RespiratoryReading[]
+  activityRecords     ActivityRecord[]
+  fallEvents          FallEvent[]
+  emergencyEvents     EmergencyEvent[]
+  alerts              Alert[]
+  medications         Medication[]
+  medicationLogs      MedicationLog[]
+  reminders           Reminder[]
+  appointments        Appointment[]
+  wellnessResponses   WellnessResponse[]
+  doctorNotes         DoctorNote[]
+  healthReports       HealthReport[]
+
+  @@index([userId])
+}
+
+model CaregiverProfile {
+  id                   String    @id @default(uuid())
+  userId               String    @unique
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  relationshipToElderly String?
+  organization         String?
+  emergencyPhone       String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  relationships PatientRelationship[]
+
+  @@index([userId])
+}
+
+model DoctorProfile {
+  id             String    @id @default(uuid())
+  userId         String    @unique
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  specialization String?   @default("General Physician")
+  licenseNumber  String?
+  hospital       String?
+  contactPhone   String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  relationships PatientRelationship[]
+  doctorNotes   DoctorNote[]
+  healthReports HealthReport[]
+  appointments  Appointment[]
+
+  @@index([userId])
+}
+
+model PatientRelationship {
+  id               String            @id @default(uuid())
+  patientId        String
+  patient          ElderlyProfile    @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  caregiverId      String?
+  caregiver        CaregiverProfile? @relation(fields: [caregiverId], references: [id], onDelete: Cascade)
+  doctorId         String?
+  doctor           DoctorProfile?    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  relationshipType String            @default("PRIMARY")
+  isPrimary        Boolean           @default(false)
+  status           String            @default("ACTIVE")
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([patientId])
+  @@index([caregiverId])
+  @@index([doctorId])
+  @@index([status])
+}
+
+model EmergencyContact {
+  id           String         @id @default(uuid())
+  patientId    String
+  patient      ElderlyProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  name         String
+  relationship String
+  phone        String
+  email        String?
+  priority     Int            @default(1)
+  isPrimary    Boolean        @default(false)
+  isActive     Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([patientId])
+  @@index([priority])
+}
+
+model Device {
+  id               String           @id @default(uuid())
+  deviceId         String           @unique
+  patientId        String?
+  patient          ElderlyProfile?  @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  deviceName       String           @default("VIORA Smart Neckband v2")
+  model            String           @default("ESP32-WROOM-32E")
+  macAddress       String?
+  firmwareVersion  String           @default("2.4.1")
+  batteryLevel     Int              @default(88)
+  chargingStatus   ChargingStatus   @default(DISCHARGING)
+  connectionStatus ConnectionStatus @default(CONNECTED)
+  wifiStatus       ConnectionStatus @default(CONNECTED)
+  bluetoothStatus  ConnectionStatus @default(CONNECTED)
+  lastSeen         DateTime         @default(now())
+  lastHeartbeat    DateTime         @default(now())
+  isSimulated      Boolean          @default(true)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  readings DeviceReading[]
+
+  @@index([patientId])
+  @@index([deviceId])
+}
+
+model DeviceReading {
+  id         String   @id @default(uuid())
+  deviceId   String
+  device     Device   @relation(fields: [deviceId], references: [deviceId], onDelete: Cascade)
+  rawPayload Json
+  timestamp  DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([deviceId])
+  @@index([timestamp])
+}
+
+model HealthReading {
+  id                String            @id @default(uuid())
+  patientId         String
+  patient           ElderlyProfile    @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  heartRate         Float
+  spo2              Float
+  skinTemperature   Float             // Measured strictly using TMP117
+  respiratoryRate   Float             // Derived from AD8232 ECG-Derived Respiration (EDR)
+  systolicBP        Float?
+  diastolicBP       Float?
+  stressLevel       Int?              @default(15)
+  status            HealthStatus      @default(STABLE)
+  measurementSource MeasurementSource @default(ECG_DERIVED_RESPIRATION)
+  isSimulated       Boolean           @default(true)
+  source            String            @default("VIORA_NECKBAND_SIMULATOR")
+  timestamp         DateTime          @default(now())
+  createdAt         DateTime          @default(now())
+
+  @@index([patientId])
+  @@index([timestamp])
+  @@index([status])
+}
+
+model EcgRecord {
+  id                   String         @id @default(uuid())
+  patientId            String
+  patient              ElderlyProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  durationSeconds      Int            @default(30)
+  sampleRate           Int            @default(250)
+  dataPoints           Json           // Array of amplitude floats
+  heartRate            Float          @default(78)
+  signalQuality        String         @default("EXCELLENT")
+  status               String         @default("NORMAL_SINUS_RHYTHM")
+  isSimulated          Boolean        @default(true)
+  rhythmInterpretation String         @default("Normal Sinus Rhythm. No acute ST changes or ectopy detected.")
+  timestamp            DateTime       @default(now())
+  createdAt            DateTime       @default(now())
+
+  @@index([patientId])
+  @@index([timestamp])
+}
+
+model RespiratoryReading {
+  id          String            @id @default(uuid())
+  patientId   String
+  patient     ElderlyProfile    @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  rate        Float
+  depth       String            @default("NORMAL")
+  method      MeasurementSource @default(ECG_DERIVED_RESPIRATION)
+  isSimulated Boolean           @default(true)
+  timestamp   DateTime          @default(now())
+  createdAt   DateTime          @default(now())
+
+  @@index([patientId])
+  @@index([timestamp])
+}
+
+model ActivityRecord {
+  id             String         @id @default(uuid())
+  patientId      String
+  patient        ElderlyProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  steps          Int            @default(0)
+  caloriesBurned Float          @default(0)
+  activeMinutes  Int            @default(0)
+  distanceMeters Float          @default(0)
+  sleepMinutes   Int?           @default(450)
+  date           DateTime       @default(now())
+  createdAt      DateTime       @default(now())
+
+  @@index([patientId])
+  @@index([date])
+}
+
+model FallEvent {
+  id                           String         @id @default(uuid())
+  patientId                    String
+  patient                      ElderlyProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  accelerationPeak             Float          @default(3.8)
+  impactVelocity               Float          @default(2.4)
+  postImpactRestDurationSeconds Int           @default(15)
+  confidenceScore              Float          @default(0.92)
+  verified                     Boolean        @default(false)
+  status                       FallStatus     @default(DETECTED)
+  timestamp                    DateTime       @default(now())
+  createdAt                    DateTime       @default(now())
+
+  @@index([patientId])
+  @@index([timestamp])
+  @@index([status])
+}
+
+model EmergencyEvent {
+  id               String          @id @default(uuid())
+  patientId        String
+  patient          ElderlyProfile  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  type             EmergencyType   @default(SOS)
+  severity         SeverityLevel   @default(CRITICAL)
+  status           EmergencyStatus @default(ACTIVE)
+  location         String?         @default("Living Room, Home")
+  source           String          @default("MANUAL_SOS_BUTTON")
+  resolvedByUserId String?
+  resolvedAt       DateTime?
+  notes            String?
+  timestamp        DateTime        @default(now())
+  createdAt        DateTime        @default(now())
+
+  @@index([patientId])
+  @@index([timestamp])
+  @@index([status])
+  @@index([severity])
+}
+
+model SafetyRule {
+  id               String        @id @default(uuid())
+  metric           MetricType
+  operator         RuleOperator
+  threshold        Float
+  severity         SeverityLevel @default(WARNING)
+  enabled          Boolean       @default(true)
+  description      String
+  isDemoThreshold  Boolean       @default(true) // Explicit label: Demo safety threshold — not a medical diagnosis
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([metric])
+  @@index([enabled])
+}
+
+model Alert {
+  id        String        @id @default(uuid())
+  patientId String
+  patient   ElderlyProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      String        @default("HEALTH")
+  severity  SeverityLevel @default(WARNING)
+  isRead    Boolean       @default(false)
+  readAt    DateTime?
+  createdAt DateTime      @default(now())
+
+  @@index([patientId])
+  @@index([createdAt])
+  @@index([isRead])
+}
+
+model Medication {
+  id           String         @id @default(uuid())
+  patientId    String
+  patient      ElderlyProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  name         String
+  dosage       String
+  form         String         @default("TABLET")
+  frequency    String         @default("ONCE_DAILY")
+  instructions String?
+  startDate    DateTime       @default(now())
+  endDate      DateTime?
+  isActive     Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  schedules MedicationSchedule[]
+  logs      MedicationLog[]
+
+  @@index([patientId])
+  @@index([isActive])
+}
+
+model MedicationSchedule {
+  id            String     @id @default(uuid())
+  medicationId  String
+  medication    Medication @relation(fields: [medicationId], references: [id], onDelete: Cascade)
+  scheduledTime String     // e.g. "08:00", "14:00", "20:00"
+  daysOfWeek    String     @default("DAILY")
+  dosage        String?
+  createdAt     DateTime   @default(now())
+
+  @@index([medicationId])
+}
+
+model MedicationLog {
+  id           String           @id @default(uuid())
+  medicationId String
+  medication   Medication       @relation(fields: [medicationId], references: [id], onDelete: Cascade)
+  patientId    String
+  patient      ElderlyProfile   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  scheduledFor DateTime         @default(now())
+  takenAt      DateTime?
+  status       MedicationStatus @default(UPCOMING)
+  loggedBy     String           @default("PATIENT")
+  notes        String?
+  createdAt    DateTime         @default(now())
+
+  @@index([patientId])
+  @@index([medicationId])
+  @@index([status])
+  @@index([scheduledFor])
+}
+
+model Reminder {
+  id               String           @id @default(uuid())
+  patientId        String
+  patient          ElderlyProfile   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  title            String
+  description      String?
+  category         ReminderCategory @default(GENERAL)
+  scheduledTime    DateTime
+  isRecurring      Boolean          @default(false)
+  recurrencePattern String?
+  status           ReminderStatus   @default(PENDING)
+  snoozedUntil     DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@index([patientId])
+  @@index([scheduledTime])
+  @@index([status])
+}
+
+model Appointment {
+  id              String            @id @default(uuid())
+  patientId       String
+  patient         ElderlyProfile    @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId        String
+  doctor          DoctorProfile     @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  title           String
+  appointmentDate DateTime
+  location        String            @default("VIORA Telehealth Video")
+  notes           String?
+  status          AppointmentStatus @default(SCHEDULED)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([appointmentDate])
+}
+
+model WellnessResponse {
+  id            String         @id @default(uuid())
+  patientId     String
+  patient       ElderlyProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  sleepHours    Float          @default(7.5)
+  sleepQuality  String         @default("GOOD")
+  dietRating    String         @default("BALANCED")
+  stressLevel   String         @default("LOW")
+  alcoholIntake String         @default("NONE")
+  tobaccoUse    String         @default("NONE")
+  weightKg      Float          @default(68.0)
+  heightCm      Float          @default(172.0)
+  bmi           Float          @default(23.0)
+  notes         String?
+  recordedDate  DateTime       @default(now())
+  createdAt     DateTime       @default(now())
+
+  @@index([patientId])
+  @@index([recordedDate])
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      NotificationType @default(HEALTH_UPDATE)
+  link      String?
+  isRead    Boolean          @default(false)
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+}
+
+model Conversation {
+  id        String   @id @default(uuid())
+  title     String?
+  isGroup   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  participants ConversationParticipant[]
+  messages     Message[]
+}
+
+model ConversationParticipant {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           String       @default("MEMBER")
+  joinedAt       DateTime     @default(now())
+  lastReadAt     DateTime?
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@index([conversationId])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  content        String
+  messageType    MessageType  @default(TEXT)
+  deliveredAt    DateTime?
+  readAt         DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
+  @@index([senderId])
+  @@index([createdAt])
+}
+
+model DoctorNote {
+  id             String         @id @default(uuid())
+  patientId      String
+  patient        ElderlyProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId       String
+  doctor         DoctorProfile  @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  diagnosis      String
+  treatmentPlan  String
+  clinicalNotes  String
+  isConfidential Boolean        @default(false)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([patientId])
+  @@index([doctorId])
+}
+
+model HealthReport {
+  id          String         @id @default(uuid())
+  patientId   String
+  patient     ElderlyProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId    String?
+  doctor      DoctorProfile? @relation(fields: [doctorId], references: [id], onDelete: SetNull)
+  reportType  String         @default("COMPREHENSIVE_ASSESSMENT")
+  summary     String
+  metricsJson Json
+  pdfUrl      String?
+  generatedAt DateTime       @default(now())
+  createdAt   DateTime       @default(now())
+
+  @@index([patientId])
+  @@index([generatedAt])
+}
+
+model AiConversation {
+  id        String      @id @default(uuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  patientId String?
+  title     String      @default("VIORA Health Assistance")
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  messages AiMessage[]
+
+  @@index([userId])
+}
+
+model AiMessage {
+  id             String         @id @default(uuid())
+  conversationId String
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String         // "system", "user", "assistant", "tool"
+  content        String
+  toolCallsJson  Json?
+  toolResultJson Json?
+  createdAt      DateTime       @default(now())
+
+  @@index([conversationId])
+}
+
+model CommunityPost {
+  id            String             @id @default(uuid())
+  authorId      String
+  author        User               @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  title         String
+  content       String
+  category      String             @default("WELLNESS_TIPS")
+  likesCount    Int                @default(0)
+  commentsCount Int                @default(0)
+  isPinned      Boolean            @default(false)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  comments CommunityComment[]
+  likes    CommunityLike[]
+
+  @@index([authorId])
+  @@index([createdAt])
+}
+
+model CommunityComment {
+  id        String        @id @default(uuid())
+  postId    String
+  post      CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  content   String
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@index([postId])
+  @@index([authorId])
+}
+
+model CommunityLike {
+  id        String        @id @default(uuid())
+  postId    String
+  post      CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime      @default(now())
+
+  @@unique([postId, userId])
+  @@index([postId])
+  @@index([userId])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     String
+  entityType String
+  entityId   String?
+  details    Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
