@@ -12,10 +12,12 @@ import {
   CheckCircle,
   History,
   Sparkles,
+  AlertCircle,
 } from 'lucide-react';
 
 export const ElderlyWellnessPage: React.FC = () => {
-  const { activePatientId } = useAuth();
+  const { user, activePatientId } = useAuth();
+  const targetPatientId = activePatientId || (user as any)?.profile?.id;
 
   const [sleepHours, setSleepHours] = useState(7.5);
   const [sleepQuality, setSleepQuality] = useState('RESTFUL');
@@ -26,11 +28,12 @@ export const ElderlyWellnessPage: React.FC = () => {
   const [notes, setNotes] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [history, setHistory] = useState<WellnessResponse[]>([]);
 
   const fetchHistory = () => {
-    if (!activePatientId) return;
-    api.get(`/wellness/history/${activePatientId}`)
+    if (!targetPatientId) return;
+    api.get(`/wellness/history/${targetPatientId}`)
       .then((res) => {
         if (res.data?.data) setHistory(res.data.data);
       })
@@ -39,35 +42,41 @@ export const ElderlyWellnessPage: React.FC = () => {
 
   useEffect(() => {
     fetchHistory();
-  }, [activePatientId]);
+  }, [targetPatientId]);
 
   const bmi = parseFloat((weightKg / Math.pow(heightCm / 100, 2)).toFixed(1));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activePatientId) return;
+    if (!targetPatientId) {
+      setErrorMessage('Patient profile not loaded yet. Please reload.');
+      return;
+    }
+
     setLoading(true);
+    setErrorMessage(null);
 
     try {
       await api.post('/wellness/submit', {
-        patientId: activePatientId,
-        sleepHours,
+        patientId: targetPatientId,
+        sleepHours: Number(sleepHours),
         sleepQuality,
         dietRating,
         stressLevel,
         alcoholIntake: 'NONE',
         tobaccoUse: 'NONE',
-        weightKg,
-        heightCm,
-        notes: notes || 'Daily self-check submitted',
+        weightKg: Number(weightKg),
+        heightCm: Number(heightCm),
+        notes: notes.trim() || 'Daily self-check submitted',
       });
 
       setSubmitted(true);
       confetti({ particleCount: 70, spread: 60 });
       fetchHistory();
       setTimeout(() => setSubmitted(false), 5000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error submitting wellness questionnaire:', err);
+      setErrorMessage(err.response?.data?.message || 'Failed to save wellness questionnaire.');
     } finally {
       setLoading(false);
     }
@@ -86,6 +95,13 @@ export const ElderlyWellnessPage: React.FC = () => {
           A quick 1-minute check to keep Priya and Dr. Sharma informed of how you feel.
         </p>
       </div>
+
+      {errorMessage && (
+        <div className="bg-rose-50 border-2 border-rose-300 text-rose-900 p-4 rounded-2xl flex items-center gap-3">
+          <AlertCircle className="w-6 h-6 text-rose-600 shrink-0" />
+          <span className="text-sm font-bold">{errorMessage}</span>
+        </div>
+      )}
 
       {submitted && (
         <div className="bg-emerald-50 border-2 border-emerald-400 text-emerald-900 p-5 rounded-2xl flex items-center gap-3 shadow-md animate-fade-in">

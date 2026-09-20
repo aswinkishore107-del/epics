@@ -173,4 +173,26 @@ router.post('/:patientId/emergency-contacts', authenticateToken, verifyPatientAc
   }
 });
 
+// DELETE /api/patients/:patientId/emergency-contacts/:contactId
+router.delete('/:patientId/emergency-contacts/:contactId', authenticateToken, verifyPatientAccess, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { contactId, patientId } = req.params;
+
+    const contact = await prisma.emergencyContact.findFirst({
+      where: { id: contactId, patientId },
+    });
+
+    if (!contact) {
+      res.status(404).json({ success: false, message: 'Emergency contact not found' });
+      return;
+    }
+
+    await prisma.emergencyContact.delete({ where: { id: contactId } });
+
+    res.json({ success: true, message: 'Emergency contact deleted from database.' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message, code: 'INTERNAL_ERROR' });
+  }
+});
+
 export default router;

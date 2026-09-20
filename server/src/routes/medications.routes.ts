@@ -145,30 +145,113 @@ const medCreateSchema = z.object({
 
 router.post('/', authenticateToken, verifyPatientAccess, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
+    if (req.body.frequency) {
+      const f = String(req.body.frequency).toUpperCase().replace(/\s+/g, '_');
+      if (f.includes('TWICE')) req.body.frequency = 'TWICE_DAILY';
+      else if (f.includes('THREE')) req.body.frequency = 'THREE_TIMES_DAILY';
+      else if (f.includes('PRN') || f.includes('NEEDED')) req.body.frequency = 'AS_NEEDED';
+      else req.body.frequency = 'ONCE_DAILY';
+    }
+    if (!req.body.dosage || !String(req.body.dosage).trim()) {
+      req.body.dosage = '1 dose';
+    }
+    if (!req.body.scheduledTimes || !Array.isArray(req.body.scheduledTimes) || req.body.scheduledTimes.length === 0) {
+      req.body.scheduledTimes = ['08:00'];
+    }
+
     const body = medCreateSchema.parse(req.body);
 
     const med = await prisma.medication.create({
       data: {
         patientId: body.patientId,
-        name: body.name,
-        dosage: body.dosage,
+        name: body.name.trim(),
+        dosage: body.dosage.trim(),
         form: body.form,
         frequency: body.frequency,
-        instructions: body.instructions,
+        instructions: body.instructions?.trim() || undefined,
         schedules: {
           create: body.scheduledTimes.map((time) => ({
             scheduledTime: time,
             daysOfWeek: 'DAILY',
-            dosage: body.dosage,
+            dosage: body.dosage.trim(),
           })),
         },
       },
       include: { schedules: true },
     });
 
+    socketService.emitToPatientRoom(body.patientId, 'medication_created', {
+      medication: med,
+      patientId: body.patientId,
+    });
+
+    try {
+      await notificationService.notifyPatientTeam(body.patientId, {
+        title: `New Prescription: ${med.name}`,
+        message: `${med.name} (${med.dosage}) was prescribed.`,
+        type: 'MEDICATION',
+      });
+    } catch {}
+
     res.status(201).json({ success: true, data: med });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message, code: 'VALIDATION_ERROR' });
+  }
+});
+
+// DELETE /api/medications/:id (Delete prescription permanently from database)
+router.delete('/:id', authenticateToken, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    const medication = await prisma.medication.findUnique({
+      where: { id },
+    });
+
+    if (!medication) {
+      res.status(404).json({ success: false, message: 'Medication not found', code: 'MEDICATION_NOT_FOUND' });
+      return;
+    }
+
+    // Explicitly delete schedules and logs before deleting medication
+    await prisma.medicationSchedule.deleteMany({
+      where: { medicationId: id },
+    });
+    await prisma.medicationLog.deleteMany({
+      where: { medicationId: id },
+    });
+
+    // Delete medication from database
+    await prisma.medication.delete({
+      where: { id },
+    });
+
+    // Real-time broadcast to patient room
+    socketService.emitToPatientRoom(medication.patientId, 'medication_deleted', {
+      medicationId: id,
+      medicationName: medication.name,
+      patientId: medication.patientId,
+    });
+
+    // Notify patient team
+    try {
+      await notificationService.notifyPatientTeam(medication.patientId, {
+        title: `Prescription Removed: ${medication.name}`,
+        message: `${medication.name} (${medication.dosage}) was removed from active prescriptions.`,
+        type: 'MEDICATION',
+      });
+    } catch (nErr) {
+      console.warn('Could not dispatch notification:', nErr);
+    }
+
+    res.json({
+      success: true,
+      message: `Prescription "${medication.name}" deleted permanently from database.`,
+      data: { id, name: medication.name },
+    });
+  } catch (error: any) {
+    console.error('Error deleting medication:', error);
+    res.status(500).json({ success: false, message: error.message, code: 'INTERNAL_ERROR' });
   }
 });
 

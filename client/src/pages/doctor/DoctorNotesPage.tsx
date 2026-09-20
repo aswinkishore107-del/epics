@@ -9,29 +9,41 @@ import {
   CheckCircle2,
   Filter,
   RefreshCw,
-  Sparkles
+  Sparkles,
+  Trash2,
+  Check,
+  X,
+  AlertCircle
 } from 'lucide-react';
 import api from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
+import { useSocket } from '../../context/SocketContext';
 
 export const DoctorNotesPage: React.FC = () => {
   const { user, activePatientId } = useAuth();
+  const { socket } = useSocket();
   const [notes, setNotes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
 
-  // New Note
+  // New Note Modal
   const [showModal, setShowModal] = useState(false);
   const [content, setContent] = useState('');
   const [category, setCategory] = useState('SOAP');
   const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Toast / Feedback
+  const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
 
   const fetchNotes = async () => {
     try {
       setLoading(true);
       const res = await api.get('/notes');
-      setNotes(Array.isArray(res.data) ? res.data : []);
+      const list = res.data?.data || res.data;
+      setNotes(Array.isArray(list) ? list : []);
     } catch (err) {
       console.error('Error fetching clinical notes:', err);
     } finally {
@@ -41,31 +53,80 @@ export const DoctorNotesPage: React.FC = () => {
 
   useEffect(() => {
     fetchNotes();
-  }, []);
+  }, [activePatientId]);
+
+  // Real-time socket sync
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleNoteCreated = (data: { note: any }) => {
+      setNotes((prev) => {
+        if (prev.some((n) => n.id === data.note.id)) return prev;
+        return [data.note, ...prev];
+      });
+    };
+
+    const handleNoteDeleted = (data: { noteId: string }) => {
+      setNotes((prev) => prev.filter((n) => n.id !== data.noteId));
+    };
+
+    socket.on('note_created', handleNoteCreated);
+    socket.on('note_deleted', handleNoteDeleted);
+
+    return () => {
+      socket.off('note_created', handleNoteCreated);
+      socket.off('note_deleted', handleNoteDeleted);
+    };
+  }, [socket]);
 
   const handleCreateNote = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim()) return;
+
     try {
       setSubmitting(true);
+      setErrorToast(null);
+
       const res = await api.post('/notes', {
-        patientId: activePatientId || 'demo-id',
+        patientId: activePatientId || undefined,
         category,
-        content,
+        content: content.trim(),
       });
-      setNotes([res.data, ...notes]);
+
+      const newNote = res.data?.data || res.data;
+      setNotes((prev) => [newNote, ...prev.filter((n) => n.id !== newNote.id)]);
       setContent('');
       setShowModal(false);
-    } catch (err) {
+      setSuccessToast('Clinical note signed and saved to database successfully!');
+      setTimeout(() => setSuccessToast(null), 4000);
+    } catch (err: any) {
       console.error('Error creating note:', err);
+      setErrorToast(err.response?.data?.message || 'Failed to save note. Please check inputs.');
+      setTimeout(() => setErrorToast(null), 4000);
     } finally {
       setSubmitting(false);
     }
   };
 
+  const handleDeleteNote = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this clinical note from the database?')) return;
+
+    try {
+      setDeletingId(id);
+      await api.delete(`/notes/${id}`);
+      setNotes((prev) => prev.filter((n) => n.id !== id));
+      setSuccessToast('Clinical note removed from database.');
+      setTimeout(() => setSuccessToast(null), 3000);
+    } catch (err) {
+      console.error('Error deleting note:', err);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const filteredNotes = notes.filter((n) => {
     const matchesSearch =
-      (n.content || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (n.content || n.clinicalNotes || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (n.doctorName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (n.patient?.name || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = selectedCategory === 'ALL' || n.category === selectedCategory;
@@ -74,6 +135,21 @@ export const DoctorNotesPage: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
+      {/* Toast Feedback */}
+      {successToast && (
+        <div className="fixed top-6 right-6 z-50 bg-emerald-600 text-white font-bold px-6 py-3.5 rounded-2xl shadow-xl flex items-center gap-3 transition-all animate-bounce">
+          <Check className="w-5 h-5 text-emerald-200" />
+          <span>{successToast}</span>
+        </div>
+      )}
+
+      {errorToast && (
+        <div className="fixed top-6 right-6 z-50 bg-rose-600 text-white font-bold px-6 py-3.5 rounded-2xl shadow-xl flex items-center gap-3 transition-all">
+          <AlertCircle className="w-5 h-5 text-rose-200" />
+          <span>{errorToast}</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
@@ -83,8 +159,11 @@ export const DoctorNotesPage: React.FC = () => {
           </p>
         </div>
         <button
-          onClick={() => setShowModal(true)}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-teal-600 text-white rounded-xl text-sm font-semibold shadow-sm hover:bg-teal-700 transition-all"
+          onClick={() => {
+            setContent('');
+            setShowModal(true);
+          }}
+          className="inline-flex items-center gap-2 px-5 py-3 bg-teal-600 text-white rounded-xl text-sm font-bold shadow-md hover:bg-teal-700 active:scale-95 transition-all cursor-pointer"
         >
           <Plus className="w-4 h-4" />
           Write Clinical Note
@@ -109,7 +188,7 @@ export const DoctorNotesPage: React.FC = () => {
             <button
               key={cat}
               onClick={() => setSelectedCategory(cat)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors whitespace-nowrap ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors whitespace-nowrap cursor-pointer ${
                 selectedCategory === cat
                   ? 'bg-teal-600 text-white'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -127,11 +206,11 @@ export const DoctorNotesPage: React.FC = () => {
           <RefreshCw className="w-8 h-8 text-teal-600 animate-spin" />
         </div>
       ) : filteredNotes.length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-2xl border border-slate-200 p-8">
+        <div className="text-center py-16 bg-white rounded-2xl border border-slate-200 p-8 shadow-sm">
           <FileText className="w-12 h-12 text-slate-300 mx-auto mb-3" />
           <h3 className="font-bold text-slate-700">No clinical notes found</h3>
           <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-            Record a new SOAP note or clinical observation using the button above.
+            Record a new SOAP note or clinical observation using the &quot;Write Clinical Note&quot; button above.
           </p>
         </div>
       ) : (
@@ -139,29 +218,40 @@ export const DoctorNotesPage: React.FC = () => {
           {filteredNotes.map((note) => (
             <div
               key={note.id}
-              className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-3"
+              className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-3 hover:shadow-md transition-all"
             >
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-3">
                   <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-teal-50 text-teal-700 border border-teal-200">
                     {note.category || 'SOAP'}
                   </span>
-                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <div className="flex items-center gap-2 text-xs text-slate-500 font-semibold">
                     <User className="w-3.5 h-3.5 text-slate-400" />
-                    Patient: <strong>{note.patient?.name || 'Rajesh Kumar'}</strong>
+                    Patient: <strong className="text-slate-900">{note.patient?.name || 'Rajesh Kumar'}</strong>
                   </div>
                 </div>
-                <span className="text-xs text-slate-400 font-mono flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5" />
-                  {new Date(note.createdAt).toLocaleString()}
-                </span>
+
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-slate-400 font-mono flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5" />
+                    {new Date(note.createdAt).toLocaleString()}
+                  </span>
+                  <button
+                    onClick={() => handleDeleteNote(note.id)}
+                    disabled={deletingId === note.id}
+                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all cursor-pointer"
+                    title="Delete clinical note"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
               <div className="bg-slate-50/70 p-4 rounded-xl border border-slate-100 text-sm text-slate-800 leading-relaxed whitespace-pre-wrap font-sans">
-                {note.content}
+                {note.content || note.clinicalNotes}
               </div>
 
-              <div className="flex items-center justify-between text-xs text-slate-400 pt-1">
+              <div className="flex items-center justify-between text-xs text-slate-400 pt-1 flex-wrap gap-2">
                 <span className="text-teal-700 font-semibold flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5 text-teal-600" />
                   Clinician Signature: {note.doctorName || 'Dr. Arvind Sharma, Cardiologist'}
@@ -182,7 +272,7 @@ export const DoctorNotesPage: React.FC = () => {
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-                className="text-xs font-semibold border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 bg-slate-50"
+                className="text-xs font-semibold border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 bg-slate-50 cursor-pointer"
               >
                 <option value="SOAP">SOAP Note</option>
                 <option value="ROUTINE">Routine Follow-up</option>
@@ -194,7 +284,7 @@ export const DoctorNotesPage: React.FC = () => {
             <form onSubmit={handleCreateNote} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Clinical Observations & Plan
+                  Clinical Observations & Plan *
                 </label>
                 <textarea
                   rows={6}
@@ -206,20 +296,30 @@ export const DoctorNotesPage: React.FC = () => {
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-2">
+              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="px-4 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                  className="px-4 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting || !content.trim()}
-                  className="px-4 py-2 bg-teal-600 text-white rounded-xl text-sm font-semibold hover:bg-teal-700 disabled:opacity-50"
+                  className="px-5 py-2.5 bg-teal-600 text-white rounded-xl text-sm font-bold hover:bg-teal-700 active:scale-95 transition-all shadow-md disabled:opacity-50 flex items-center gap-2 cursor-pointer"
                 >
-                  {submitting ? 'Saving...' : 'Save & Sign Note'}
+                  {submitting ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Saving & Signing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Save & Sign Note</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

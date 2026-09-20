@@ -75,15 +75,19 @@ export const DoctorPatientDetailPage: React.FC = () => {
         api.get(`/patients/${patientId}`).catch(() => ({ data: null })),
         api.get(`/vitals/history?patientId=${patientId}&range=24h`).catch(() => ({ data: [] })),
         api.get(`/notes?patientId=${patientId}`).catch(() => ({ data: [] })),
-        api.get(`/medications?patientId=${patientId}`).catch(() => ({ data: [] })),
+        api.get(`/medications/patient/${patientId}`).catch(() => ({ data: [] })),
         api.get(`/reports?patientId=${patientId}`).catch(() => ({ data: [] })),
       ]);
 
-      if (pRes.data) setPatient(pRes.data);
-      if (Array.isArray(vRes.data)) setVitalsHistory(vRes.data);
-      if (Array.isArray(nRes.data)) setNotes(nRes.data);
-      if (Array.isArray(mRes.data)) setMedications(mRes.data);
-      if (Array.isArray(rRes.data)) setReports(rRes.data);
+      if (pRes.data?.data || pRes.data) setPatient(pRes.data?.data || pRes.data);
+      const vList = vRes.data?.data || vRes.data;
+      if (Array.isArray(vList)) setVitalsHistory(vList);
+      const nList = nRes.data?.data || nRes.data;
+      if (Array.isArray(nList)) setNotes(nList);
+      const mList = mRes.data?.data || mRes.data;
+      if (Array.isArray(mList)) setMedications(mList);
+      const rList = rRes.data?.data || rRes.data;
+      if (Array.isArray(rList)) setReports(rList);
     } catch (err) {
       console.error('Error fetching patient clinical data:', err);
     } finally {
@@ -103,9 +107,10 @@ export const DoctorPatientDetailPage: React.FC = () => {
       const res = await api.post('/notes', {
         patientId: patient.id,
         category: noteCategory,
-        content: noteContent,
+        content: noteContent.trim(),
       });
-      setNotes([res.data, ...notes]);
+      const newNote = res.data?.data || res.data;
+      setNotes((prev) => [newNote, ...prev]);
       setNoteContent('');
     } catch (err) {
       console.error('Error adding clinical note:', err);
@@ -117,15 +122,23 @@ export const DoctorPatientDetailPage: React.FC = () => {
   const handlePrescribe = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMedName.trim() || !patient) return;
+
+    let freq = 'ONCE_DAILY';
+    if (newMedFreq.toLowerCase().includes('twice')) freq = 'TWICE_DAILY';
+    else if (newMedFreq.toLowerCase().includes('three')) freq = 'THREE_TIMES_DAILY';
+    else if (newMedFreq.toLowerCase().includes('needed') || newMedFreq.toLowerCase().includes('prn')) freq = 'AS_NEEDED';
+
     try {
       const res = await api.post('/medications', {
         patientId: patient.id,
-        name: newMedName,
-        dosage: newMedDosage,
-        frequency: newMedFreq,
-        instructions: newMedInstructions,
+        name: newMedName.trim(),
+        dosage: newMedDosage.trim() || '1 dose',
+        frequency: freq,
+        instructions: newMedInstructions.trim(),
+        scheduledTimes: ['08:00'],
       });
-      setMedications([res.data, ...medications]);
+      const newMed = res.data?.data || res.data;
+      setMedications((prev) => [newMed, ...prev]);
       setShowPrescribeModal(false);
       setNewMedName('');
       setNewMedDosage('');
@@ -142,9 +155,10 @@ export const DoctorPatientDetailPage: React.FC = () => {
       const res = await api.post('/reports/generate', {
         patientId: patient.id,
         range: '7d',
-        title: `Comprehensive Weekly Clinical Review - ${patient.name}`
+        title: `Comprehensive Weekly Clinical Review - ${patient.user?.firstName || patient.name || 'Rajesh'}`
       });
-      setReports([res.data, ...reports]);
+      const newReport = res.data?.data || res.data;
+      setReports((prev) => [newReport, ...prev]);
       setReportSuccess(true);
       setTimeout(() => setReportSuccess(false), 4000);
     } catch (err) {

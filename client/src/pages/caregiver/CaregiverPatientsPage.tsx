@@ -13,6 +13,7 @@ import {
   Calendar,
   MapPin,
   CheckCircle,
+  AlertCircle,
 } from 'lucide-react';
 
 export const CaregiverPatientsPage: React.FC = () => {
@@ -27,6 +28,11 @@ export const CaregiverPatientsPage: React.FC = () => {
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [priority, setPriority] = useState(2);
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
+  const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
 
   const fetchPatientData = () => {
     if (!activePatientId) return;
@@ -51,12 +57,13 @@ export const CaregiverPatientsPage: React.FC = () => {
     e.preventDefault();
     if (!name.trim() || !phone.trim() || !activePatientId) return;
 
+    setIsSubmitting(true);
     try {
       await api.post(`/patients/${activePatientId}/emergency-contacts`, {
-        name,
-        relationship,
-        phone,
-        email,
+        name: name.trim(),
+        relationship: relationship.trim(),
+        phone: phone.trim(),
+        email: email.trim() || undefined,
         priority: Number(priority),
         isPrimary: priority === 1,
       });
@@ -65,14 +72,53 @@ export const CaregiverPatientsPage: React.FC = () => {
       setRelationship('');
       setPhone('');
       setEmail('');
+      setSuccessToast(`Emergency contact "${name}" saved to database.`);
+      setTimeout(() => setSuccessToast(null), 3500);
       fetchPatientData();
+    } catch (err: any) {
+      console.error(err);
+      setErrorToast(err.response?.data?.message || 'Failed to save emergency contact.');
+      setTimeout(() => setErrorToast(null), 3500);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteContact = async (contactId: string, contactName: string) => {
+    if (!window.confirm(`Are you sure you want to remove ${contactName} from emergency contacts?`)) return;
+
+    setDeletingContactId(contactId);
+    try {
+      await api.delete(`/patients/${activePatientId}/emergency-contacts/${contactId}`);
+      setContacts((prev) => prev.filter((c) => c.id !== contactId));
+      setSuccessToast(`Contact "${contactName}" removed from database.`);
+      setTimeout(() => setSuccessToast(null), 3500);
     } catch (err) {
       console.error(err);
+      setErrorToast('Failed to delete emergency contact.');
+      setTimeout(() => setErrorToast(null), 3500);
+    } finally {
+      setDeletingContactId(null);
     }
   };
 
   return (
     <div className="space-y-8 pb-12">
+      {/* Toast Feedback */}
+      {successToast && (
+        <div className="fixed top-6 right-6 z-50 bg-emerald-600 text-white font-bold px-6 py-3.5 rounded-2xl shadow-xl flex items-center gap-3 transition-all animate-bounce">
+          <CheckCircle className="w-5 h-5 text-emerald-200" />
+          <span>{successToast}</span>
+        </div>
+      )}
+
+      {errorToast && (
+        <div className="fixed top-6 right-6 z-50 bg-rose-600 text-white font-bold px-6 py-3.5 rounded-2xl shadow-xl flex items-center gap-3 transition-all">
+          <AlertCircle className="w-5 h-5 text-rose-200" />
+          <span>{errorToast}</span>
+        </div>
+      )}
+
       {/* Patient Profile Card */}
       <div className="bg-white rounded-3xl p-6 sm:p-8 border-2 border-slate-200 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
         <div className="flex items-center gap-5">
@@ -156,8 +202,17 @@ export const CaregiverPatientsPage: React.FC = () => {
                   </div>
                 </div>
               </div>
-
-              <span className="text-xs font-bold text-slate-400">Escalation Rank {c.priority}</span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-bold text-slate-400">Escalation Rank {c.priority}</span>
+                <button
+                  onClick={() => handleDeleteContact(c.id, c.name)}
+                  disabled={deletingContactId === c.id}
+                  className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+                  title={`Delete emergency contact ${c.name}`}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -228,9 +283,10 @@ export const CaregiverPatientsPage: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm px-6 py-2.5 rounded-xl shadow-md"
+                  disabled={isSubmitting}
+                  className="bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm px-6 py-2.5 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
                 >
-                  Save Contact
+                  {isSubmitting ? 'Saving...' : 'Save Contact'}
                 </button>
               </div>
             </form>

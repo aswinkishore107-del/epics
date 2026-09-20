@@ -13,7 +13,22 @@ export const verifyPatientAccess = async (
     return;
   }
 
-  const patientId = req.params.patientId || req.body.patientId || req.query.patientId as string;
+  let patientId = req.params.patientId || req.body?.patientId || req.query?.patientId as string;
+
+  // Auto-resolve patientId for ELDERLY users if not explicitly passed
+  if (!patientId && req.user.role === UserRole.ELDERLY) {
+    try {
+      const profile = await prisma.elderlyProfile.findUnique({
+        where: { userId: req.user.id },
+      });
+      if (profile) {
+        patientId = profile.id;
+        if (req.body) req.body.patientId = patientId;
+      }
+    } catch {
+      // Fall through to validation check
+    }
+  }
 
   if (!patientId) {
     res.status(400).json({ success: false, message: 'Patient ID is required', code: 'PATIENT_ID_REQUIRED' });

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useSocket } from '../../context/SocketContext';
 import api from '../../api/client';
 import { Medication } from '../../types';
 import confetti from 'canvas-confetti';
@@ -16,6 +17,7 @@ import {
 
 export const ElderlyMedicationsPage: React.FC = () => {
   const { activePatientId } = useAuth();
+  const { socket } = useSocket();
   const [medications, setMedications] = useState<Medication[]>([]);
   const [adherence, setAdherence] = useState<{ adherenceRate: number; takenCount: number; totalLogged: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -39,6 +41,17 @@ export const ElderlyMedicationsPage: React.FC = () => {
   useEffect(() => {
     fetchMeds();
   }, [activePatientId]);
+
+  useEffect(() => {
+    if (!socket) return;
+    const handleDeleted = (data: { medicationId: string }) => {
+      setMedications((prev) => prev.filter((m) => m.id !== data.medicationId));
+    };
+    socket.on('medication_deleted', handleDeleted);
+    return () => {
+      socket.off('medication_deleted', handleDeleted);
+    };
+  }, [socket]);
 
   const handleMarkTaken = async (med: Medication) => {
     if (!activePatientId || med.todayStatus === 'TAKEN') return;

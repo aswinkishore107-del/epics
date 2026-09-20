@@ -150,10 +150,15 @@ export interface Reminder {
   id: string;
   patientId: string;
   title: string;
-  description?: string;
+  description?: string | null;
   category: 'MEDICATION' | 'ACTIVITY' | 'APPOINTMENT' | 'HYDRATION' | 'GENERAL';
   scheduledTime: string;
+  isRecurring?: boolean;
+  recurrencePattern?: string | null;
   status: 'PENDING' | 'COMPLETED' | 'SNOOZED' | 'DISMISSED';
+  snoozedUntil?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface WellnessResponse {
